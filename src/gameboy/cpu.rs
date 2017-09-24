@@ -6,6 +6,10 @@ use super::memory::MemoryUnit;
 use std::fmt::{Formatter, Display, Result as FmtResult};
 
 
+use std::rc::Rc;
+use std::cell::RefCell;
+
+
 
 #[derive(Debug, Clone, Copy)]
 struct FlagsRegister {
@@ -187,7 +191,7 @@ impl Display for DoubleRegister {
 
 
 
-pub struct Cpu {
+pub struct Cpu<'a> {
     program_counter: u16,
     stack_pointer: u16,
     registers: Registers,
@@ -195,77 +199,236 @@ pub struct Cpu {
     // TODO: Is this needed? Is it better to just pass it in to
     // the fetch_and_execute function directly? The reference could
     // be made part of the ByteAddress, etc.
-    // memory: Rc<RefCell<MemoryUnit<'a>>>,
+    memory: Rc<RefCell<MemoryUnit<'a>>>,
 }
 
-impl Cpu {
-    pub fn new() -> Cpu {
+impl<'a> Cpu<'a> {
+    pub fn new(memory: Rc<RefCell<MemoryUnit<'a>>>) -> Cpu<'a> {
         Cpu {
             program_counter: 0,
             stack_pointer: 0,
             registers: Registers::new(),
+            memory,
         }
+    }
+
+    pub fn reset(&mut self) {
+        // http://problemkaputt.de/pandocs.htm#powerupsequence
+        self.memory.borrow_mut().reset();
+        self.program_counter = 0x0100;
+        self.write_double_register(DoubleRegister::AF, 0x01b0);
+        self.write_double_register(DoubleRegister::BC, 0x0013);
+        self.write_double_register(DoubleRegister::DE, 0x00d8);
+        self.write_double_register(DoubleRegister::HL, 0x014d);
+        self.stack_pointer = 0xfffe;
+        // TODO: Reset IO ports
     }
 
     // TODO: put wrapper around this function?
     /// Fetch and decode an instruction.
-    pub fn fetch_and_execute(&mut self, memory: &mut MemoryUnit) {
-        let info = Instruction::fetch_and_decode(self.program_counter, memory);
-        self.program_counter += info.size_in_bytes as u16;
+    pub fn fetch_and_execute(&mut self) {
+        let info = Instruction::fetch_and_decode(self.program_counter, &self.memory.borrow());
 
-        println!("{}", info.instruction.to_string());
-        self.execute(info.instruction, memory);
+        //self.program_counter += info.size_in_bytes as u16;
+        // self.execute(info.instruction);
+
+        // println!("{}", info.instruction.to_string());
+
+        // TODO: Make a proper debugger interface
+        // For now...
+        println!("{:<15}  PC=0x{:04x}  SP=0x{:04x}  A={:02x}  B={:02x}  C={:02x}  D={:02x}  E={:02x}  H={:02x}  L={:02x}  Flags[{}{}{}{}]",
+            info.instruction.to_string(),
+            self.program_counter,
+            self.stack_pointer,
+            self.registers.a,
+            self.registers.b,
+            self.registers.c,
+            self.registers.d,
+            self.registers.e,
+            self.registers.h,
+            self.registers.l,
+            if self.registers.flags.zero { "Z" } else { "-" },
+            if self.registers.flags.negative { "N" } else { "-" },
+            if self.registers.flags.half_carry { "H" } else { "-" },
+            if self.registers.flags.carry { "C" } else { "-" });
+
+        self.program_counter += info.size_in_bytes as u16;
+        self.execute(info.instruction);
 
 
 
         // TODO: report timing cycles
     }
 
-    fn execute(&mut self, instruction: Instruction, memory: &mut MemoryUnit) {
+    fn execute(&mut self, instruction: Instruction) {
+        use self::Instruction::*;
         match instruction {
 
             // TODO: Put Memory back in as a struct member Rc<RefCell<MemoryUnit>>
             // and make these seperate functions
 
-            Instruction::Dec8(operand) => {
-                let start_value = self.read_byte(operand, memory);
+            Add(operand) => {
+                let operand = self.read_byte(operand);
+                let half_carry = ((self.registers.a & 0x0f) + (operand & 0x0f)) & 0x10 != 0;
+                let (result, overflowed) = self.registers.a.overflowing_add(operand);
+
+                self.registers.a = result;
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = half_carry;
+                self.registers.flags.carry = overflowed;
+            }
+
+            Adc(operand) => {
+                let operand = self.read_byte(operand);
+                let half_carry = ((self.registers.a & 0x0f) + (operand & 0x0f)) & 0x10 != 0;
+                let (mut result, overflowed) = self.registers.a.overflowing_add(operand);
+                if self.registers.flags.carry {
+                    result += 1;
+                }
+
+                self.registers.a = result;
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = half_carry;
+                self.registers.flags.carry = overflowed;
+            }
+
+
+            Dec8(operand) => {
+                let start_value = self.read_byte(operand);
                 let (new_value, overflowed) = start_value.overflowing_sub(1);
                 let half_carry = (start_value & 0x0f) == 0;
 
-                self.registers.a = new_value;
-                self.registers.flags.zero = self.registers.a == 0;
+                self.write_byte(operand, new_value);
+                self.registers.flags.zero = new_value == 0;
                 self.registers.flags.negative = false;
                 self.registers.flags.half_carry = half_carry;
                 // Carry flag not affected
             }
 
-            Instruction::Jp(condition, address) => {
-                let target = self.read_word(address, memory);
+            Inc8(operand) => {
+                let start_value = self.read_byte(operand);
+                let (new_value, overflowed) = start_value.overflowing_add(1);
+                let half_carry = (start_value & 0x0f) == 0x0f;
+
+                self.write_byte(operand, new_value);
+                self.registers.flags.zero = new_value == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = half_carry;
+                // Carry flag not affected
+            }
+
+            Jp(condition, address) => {
+                let target = self.read_word(address);
                 if condition.should_jump(self.registers.flags) {
                     self.program_counter = target;
                 }
             },
 
-            Instruction::Jr(condition, offset) => {
-                let offset = self.read_byte(offset, memory) as u16;
-                let target = self.program_counter + offset;
+            Jr(condition, offset) => {
+                // TODO: What is a better way?
+                let offset = self.read_byte(offset) as i8;
+                let target = (self.program_counter as i32) + (offset as i32);
+                if condition.should_jump(self.registers.flags) {
+                    self.program_counter = target as u16;
+                }
+            }
+
+            Load16(destination, source) => {
+                let value = self.read_word(source);
+                self.write_word(destination, value);
+            },
+
+            Load8(destination, source) => {
+                let value = self.read_byte(source);
+                self.write_byte(destination, value);
+            },
+
+            Nop => {},
+
+            Rla => {
+                /*
+                   +--------------------------+
+                   |    ___         ______    |
+                   +---|CY|<-------|7<--0|<---+
+                */
+
+                let old_value = self.registers.a;
+                let carry = if self.registers.flags.carry { 0x01 } else { 0 };
+                self.registers.a = (old_value << 1) | carry;
+
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = false;
+                self.registers.flags.carry = self.registers.a & 0x80 == 0x80;
+            }
+
+            Rlca => {
+                /*
+                            +--------------+
+                     ___    |    ______    |
+                    |CY|<---+---|7<--0|<---+
+                */
+
+                let old_value = self.registers.a;
+                self.registers.a = (old_value << 1) | (old_value >> 7);
+
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = false;
+                self.registers.flags.carry = self.registers.a & 0x80 == 0x80;
+            }
+
+            Rra => {
+                /*
+                   +--------------------------+
+                   |    ______         ___    |
+                   +---|7-->0|------->|CY|<---+
+                */
+
+                let old_value = self.registers.a;
+                let carry = if self.registers.flags.carry { 0x80 } else { 0 };
+                self.registers.a = (old_value >> 1) | carry;
+
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = false;
+                self.registers.flags.carry = self.registers.a & 0x01 == 0x01;
+            }
+
+            Rrca => {
+                /*
+                   +-------------+
+                   |             |
+                   +---|7-->0|---+--->|CY|
+                */
+
+                let old_value = self.registers.a;
+                self.registers.a = (old_value >> 1) | (old_value << 7);
+
+                self.registers.flags.zero = self.registers.a == 0;
+                self.registers.flags.negative = false;
+                self.registers.flags.half_carry = false;
+                self.registers.flags.carry = self.registers.a & 0x01 == 0x01;
+            }
+
+            Rst(target) => {
+                let pc = self.program_counter;
+                self.push_word(pc);
+                self.program_counter = 0x0000 + (target as u16);
+            }
+
+            Ret(condition) => {
+                let target = self.pop_word();
                 if condition.should_jump(self.registers.flags) {
                     self.program_counter = target;
                 }
             }
 
-            Instruction::Load16(destination, source) => {
-                let value = self.read_word(source, memory);
-                self.write_word(destination, value, memory);
-            },
 
-            Instruction::Load8(destination, source) => {
-                let value = self.read_byte(source, memory);
-                self.write_byte(destination, value, memory);
-            },
-
-            Instruction::Xor(operand) => {
-                let operand = self.read_byte(operand, memory);
+            Xor(operand) => {
+                let operand = self.read_byte(operand);
                 self.registers.a ^= operand;
                 self.registers.flags.zero = self.registers.a == 0;
                 self.registers.flags.negative = false;
@@ -275,98 +438,115 @@ impl Cpu {
 
 
 
+
+
+
+
+
             // TODO: Remove when not needed anymore
             _ => panic!("Unimplemented instruction \"{}\"", instruction),
         }
     }
 
 
-    fn read_byte(&mut self, address: ByteAddress, memory: &MemoryUnit) -> u8 {
+    fn read_byte(&mut self, address: ByteAddress) -> u8 {
         match address {
             ByteAddress::Register(register) => self.read_register(register),
 
             ByteAddress::RegisterIndirect(register) => {
                 let offset = self.read_register(register) as u16;
-                memory.read_byte(0xff00 + offset)
+                self.memory.borrow().read_byte(0xff00 + offset)
             },
 
             ByteAddress::DoubleRegisterIndirect(double_register) => {
                 let address = self.read_double_register(double_register);
-                memory.read_byte(address)
+                self.memory.borrow().read_byte(address)
             },
 
             ByteAddress::DoubleRegisterIndirectInc(double_register) => {
                 let address = self.read_double_register(double_register);
                 self.increment_double_register(double_register);
-                memory.read_byte(address)
+                self.memory.borrow().read_byte(address)
             },
 
             ByteAddress::DoubleRegisterIndirectDec(double_register) => {
                 let address = self.read_double_register(double_register);
                 self.decrement_double_register(double_register);
-                memory.read_byte(address)
+                self.memory.borrow().read_byte(address)
             },
 
             ByteAddress::Immediate(value) => value,
             ByteAddress::SignedImmediate(value) => value as u8,  // TODO: This seems like an indication that something is wrong... value is signed...
-            ByteAddress::ImmediateIndirect(value) => memory.read_byte(value),
-            ByteAddress::ImmediateIndirectOffset(value) => memory.read_byte(0xff00 + value as u16),
+            ByteAddress::ImmediateIndirect(value) => self.memory.borrow().read_byte(value),
+            ByteAddress::ImmediateIndirectOffset(value) => self.memory.borrow().read_byte(0xff00 + value as u16),
         }
     }
 
-    fn write_byte(&mut self, address: ByteAddress, value: u8, memory: &mut MemoryUnit) {
+    fn write_byte(&mut self, address: ByteAddress, value: u8) {
         match address {
             ByteAddress::Register(register) => self.write_register(register, value),
 
             ByteAddress::RegisterIndirect(register) => {
                 let offset = self.read_register(register) as u16;
-                memory.write_byte(0xff00 + offset, value)
+                self.memory.borrow_mut().write_byte(0xff00 + offset, value)
             },
 
             ByteAddress::DoubleRegisterIndirect(double_register) => {
                 let address = self.read_double_register(double_register);
-                memory.write_byte(address, value)
+                self.memory.borrow_mut().write_byte(address, value)
             },
 
             ByteAddress::DoubleRegisterIndirectInc(double_register) => {
                 let address = self.read_double_register(double_register);
                 self.increment_double_register(double_register);
-                memory.write_byte(address, value)
+                self.memory.borrow_mut().write_byte(address, value)
             },
 
             ByteAddress::DoubleRegisterIndirectDec(double_register) => {
                 let address = self.read_double_register(double_register);
                 self.decrement_double_register(double_register);
-                memory.write_byte(address, value)
+                self.memory.borrow_mut().write_byte(address, value)
             },
 
             ByteAddress::Immediate(_) | ByteAddress::SignedImmediate(_) => panic!("Tried to write to immediate byte!"),
-            ByteAddress::ImmediateIndirect(address) => memory.write_byte(address, value),
-            ByteAddress::ImmediateIndirectOffset(offset) => memory.write_byte(0xff00 + offset as u16, value),
+            ByteAddress::ImmediateIndirect(address) => self.memory.borrow_mut().write_byte(address, value),
+            ByteAddress::ImmediateIndirectOffset(offset) => self.memory.borrow_mut().write_byte(0xff00 + offset as u16, value),
         }
     }
 
-    fn read_word(&self, address: WordAddress, memory: &MemoryUnit) -> u16 {
+    fn read_word(&self, address: WordAddress) -> u16 {
         match address {
             WordAddress::ProgramCounter => self.program_counter,
             WordAddress::StackPointer => self.stack_pointer,
             WordAddress::DoubleRegister(double_register) => self.read_double_register(double_register),
             WordAddress::Immediate(value) => value,
-            WordAddress::ImmediateIndirect(address) => memory.read_word(address),
+            WordAddress::ImmediateIndirect(address) => self.memory.borrow_mut().read_word(address),
         }
     }
 
-    fn write_word(&mut self, address: WordAddress, value: u16, memory: &mut MemoryUnit) {
+    fn write_word(&mut self, address: WordAddress, value: u16) {
         match address {
             WordAddress::DoubleRegister(double_register) => self.write_double_register(double_register, value),
             WordAddress::ProgramCounter => self.program_counter = value,
             WordAddress::StackPointer => self.stack_pointer = value,
             WordAddress::Immediate(_) => panic!("Tried to write to immediate word!"),
-            WordAddress::ImmediateIndirect(address) => memory.write_word(address, value),
+            WordAddress::ImmediateIndirect(address) => self.memory.borrow_mut().write_word(address, value),
         }
     }
 
+    /// Push a word onto the stack.
+    fn push_word(&mut self, value: u16) {
+        self.memory.borrow_mut().write_word(self.stack_pointer, value);
+        let (sp, _) = self.stack_pointer.overflowing_sub(2);
+        self.stack_pointer = sp;
+    }
 
+    /// Pop a word off the stack.
+    fn pop_word(&mut self) -> u16 {
+        let (sp, _) = self.stack_pointer.overflowing_add(2);
+        self.stack_pointer = sp;
+        self.memory.borrow().read_word(self.stack_pointer)
+    }
 
     fn read_register(&self, register: Register) -> u8 {
         match register {
@@ -595,8 +775,8 @@ impl Instruction {
             // 0x00 => InstructionInfo {instruction: Nop,
             0x00 => Info::new(Nop, 1, Constant(4)),
             0x10 => Info::new(Stop, 2, Constant(4)),
-            0x20 => Info::new(Jr(JumpCondition::NonZero, immediate!(Byte)), 2, Constant(12)),  // TODO
-            0x30 => Info::new(Jr(JumpCondition::NoCarry, immediate!(Byte)), 2, Constant(12)),  // TODO
+            0x20 => Info::new(Jr(JumpCondition::NonZero, immediate!(SignedByte)), 2, Constant(12)),  // TODO
+            0x30 => Info::new(Jr(JumpCondition::NoCarry, immediate!(SignedByte)), 2, Constant(12)),  // TODO
 
             0x01 => Info::new(Load16(double_register!(BC), immediate!(Word)), 3, Constant(12)),
             0x11 => Info::new(Load16(double_register!(DE), immediate!(Word)), 3, Constant(12)),
@@ -634,9 +814,9 @@ impl Instruction {
             0x37 => Info::new(Scf, 1, Constant(4)),
 
             0x08 => Info::new(Load16(immediate_indirect!(Word), WordAddress::StackPointer), 3, Constant(20)),
-            0x18 => Info::new(Jr(JumpCondition::Unconditional, immediate!(Byte)), 2, Constant(12)),
-            0x28 => Info::new(Jr(JumpCondition::Zero, immediate!(Byte)), 2, Constant(12)),  // TODO
-            0x38 => Info::new(Jr(JumpCondition::Carry, immediate!(Byte)), 2, Constant(12)),  // TODO
+            0x18 => Info::new(Jr(JumpCondition::Unconditional, immediate!(SignedByte)), 2, Constant(12)),
+            0x28 => Info::new(Jr(JumpCondition::Zero, immediate!(SignedByte)), 2, Constant(12)),  // TODO
+            0x38 => Info::new(Jr(JumpCondition::Carry, immediate!(SignedByte)), 2, Constant(12)),  // TODO
 
             0x09 => Info::new(Add16(double_register!(HL), double_register!(BC)), 1, Constant(8)),
             0x09 => Info::new(Add16(double_register!(HL), double_register!(DE)), 1, Constant(8)),
