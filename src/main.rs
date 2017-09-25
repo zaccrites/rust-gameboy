@@ -16,6 +16,7 @@ use std::thread;
 use gameboy::cartridge::Cartridge;
 
 use gameboy::cpu::Cpu;
+use gameboy::graphics::Gpu;
 use gameboy::memory::MemoryUnit;
 
 
@@ -30,11 +31,10 @@ fn main() {
     println!("Title: \"{}\"", cartridge.title());
 
 
-    let mut memory = Rc::new(RefCell::new(MemoryUnit::new(&cartridge)));
     // let mut memory = MemoryUnit::new(&cartridge);
-    // let mut cpu = Cpu::new(memory.clone());
+    let mut memory = Rc::new(RefCell::new(MemoryUnit::new(&cartridge)));
     let mut cpu = Cpu::new(memory.clone());
-    // let mut gpu = Gpu::new(memory.clone());    // ppu?
+    let mut gpu = Gpu::new(memory.clone());
     // let mut audio = Gpu::new(memory.clone());  // apu?
 
 
@@ -44,21 +44,29 @@ fn main() {
 
     cpu.reset();
 
-    for i in 0..2000 {
-        // TODO: Print instructions as they execute? Yet another reason
-        // to have a struct for each instruction type that can give
-        //  - Implementation
-        //  - Cycle timing
-        //  - Disassembly
-        //  - etc.
-        print!("{}: ", i + 1);
-        cpu.fetch_and_execute();
+    for i in 0.. {
+        // print!("{:04}: ", i + 1);
+        let cycles = cpu.fetch_and_execute();
 
-
-        let delay = Duration::from_millis(25);
-        thread::sleep(delay);
+        gpu.step(cycles);
 
     }
+
+    // for i in 0..2000 {
+    //     // TODO: Print instructions as they execute? Yet another reason
+    //     // to have a struct for each instruction type that can give
+    //     //  - Implementation
+    //     //  - Cycle timing
+    //     //  - Disassembly
+    //     //  - etc.
+    //     print!("{}: ", i + 1);
+    //     cpu.fetch_and_execute();
+
+
+    //     let delay = Duration::from_millis(25);
+    //     thread::sleep(delay);
+
+    // }
 
     return;
 

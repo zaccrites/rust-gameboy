@@ -85,7 +85,9 @@ pub struct MemoryUnit<'a> {
 
     // TODO: IO devices register with memory unit to recieve callbacks on read/write
     // io_ports: MemoryBank,  // ???
-    io: Box<[u8]>,
+    // io: Box<[u8]>,
+    io_ports: Box<[IoPort]>,
+
 
     high_ram: Box<[u8]>,
 
@@ -119,7 +121,8 @@ impl<'a> MemoryUnit<'a> {
 
             // TODO: Is this needed? Maybe reads to registered I/O devices
             // will just bypass this?
-            io: vec![0; 128].into_boxed_slice(),
+            // io: vec![0; 128].into_boxed_slice(),
+            io_ports: vec![IoPort::new(); 128].into_boxed_slice(),
 
             interrupt_enable_register: 0,
         }
@@ -144,7 +147,7 @@ impl<'a> MemoryUnit<'a> {
             // },
 
             // TODO: I don't think this whole region is I/O. Investigate.
-            0xff00 ... 0xff7f => self.io[(address - 0xff00) as usize],
+            0xff00 ... 0xff7f => self.io_ports[(address - 0xff00) as usize].read_value,
 
             0xff80 ... 0xfffe => self.high_ram[(address - 0xff80) as usize],
             0xffff            => self.interrupt_enable_register,
@@ -174,7 +177,7 @@ impl<'a> MemoryUnit<'a> {
             // 0xff00 ... 0xff7f => {
             //     println!("Tried to write {} to I/O port at 0x{:04x}", value, address);
             // },
-            0xff00 ... 0xff7f => self.io[(address - 0xff00) as usize] = value,
+            0xff00 ... 0xff7f => self.io_ports[(address - 0xff00) as usize].written_value = Some(value),
 
             0xff80 ... 0xfffe => self.high_ram[(address - 0xff80) as usize] = value,
             0xffff            => self.interrupt_enable_register = value,
@@ -189,9 +192,53 @@ impl<'a> MemoryUnit<'a> {
         self.write_byte(address + 1, high_byte);
     }
 
+    /// Check to see if an IO port was written to, taking the written value
+    /// if there is one.
+    pub fn check_for_io_write(&mut self, port_number: u8) -> Option<u8> {
+        self.io_ports[port_number as usize].written_value.take()
+    }
+
+    pub fn set_io_read_value(&mut self, port_number: u8, value: u8) {
+        self.io_ports[port_number as usize].read_value = value;
+    }
+
+    pub fn get_io_read_value(&self, port_number: u8) -> u8 {
+        self.io_ports[port_number as usize].read_value
+    }
 
     pub fn reset(&mut self) {
         // TODO: Randomize RAM contents.
+
+        // for port in self.io_ports.iter_mut() {
+        //     *port = IoPort::new();
+        // }
+
     }
 
 }
+
+
+
+#[derive(Debug, Clone, Copy)]
+struct IoPort {
+
+    /// Writing to an IO port puts a message in the mailbox. The owner
+    /// may use it or discard it. Subsequent writes to a filled mailbox
+    /// will overwrite the previous contents.
+    written_value: Option<u8>,
+
+    read_value: u8,
+}
+
+impl IoPort {
+
+    fn new() -> IoPort {
+        IoPort {
+            written_value: None,
+            read_value: 0
+        }
+    }
+
+}
+
+
