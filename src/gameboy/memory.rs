@@ -53,8 +53,13 @@ impl<'a> Rom<'a> {
         // TODO: Panic if the address is too large for ROM size
         // as reported by cartridge type
         match address {
-            0x0000 ... 0x3fff => self.cartridge.rom[address as usize],
-            0x4000 ... 0x7fff => panic!("Switchable ROM bank NN not yet supported!"),
+            0x0000 ... 0x7fff => self.cartridge.rom[address as usize],
+
+
+            // 0x0000 ... 0x3fff => self.cartridge.rom[address as usize],
+            // This is only done with MBC, I think?
+            // 0x4000 ... 0x7fff => panic!("Switchable ROM bank NN not yet supported!"),
+
             _ => panic!("invalid ROM address 0x{:04x}", address),
         }
     }
@@ -186,8 +191,8 @@ impl<'a> MemoryUnit<'a> {
     }
 
     pub fn write_word(&mut self, address: u16, value: u16) {
-        let low_byte = (value & 0x0f) as u8;
-        let high_byte = ((value >> 8) & 0x0f) as u8;
+        let low_byte = (value & 0xff) as u8;
+        let high_byte = (value >> 8) as u8;
         self.write_byte(address, low_byte);
         self.write_byte(address + 1, high_byte);
     }
