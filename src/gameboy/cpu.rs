@@ -136,8 +136,9 @@ impl<'a> Cpu<'a> {
     }
 
     pub fn fetch_and_execute(&mut self) -> i32 {
-        let (instruction, size_in_bytes) = Instruction::decode(self.program_counter, &self.memory.borrow());
+        let instruction = Instruction::decode(self.program_counter, &self.memory.borrow());
 
+        let size_in_bytes = instruction.size_in_bytes();
 
         // TODO: What is a better way to do this?
         for i in 0..3 {
@@ -170,6 +171,7 @@ impl<'a> Cpu<'a> {
 
 
         self.program_counter += size_in_bytes as u16;
+        let machine_cycles = instruction.cycles(&self.registers.flags);
         self.execute(instruction);
 
         // IME changes wait one until after the following instruction is
@@ -184,8 +186,7 @@ impl<'a> Cpu<'a> {
         }
 
 
-        // TODO: Implement this properly
-        let machine_cycles = 4;
+        // println!("Machine cycles = {}", machine_cycles);
         machine_cycles
     }
 
@@ -726,6 +727,29 @@ impl Byte {
 
         }
     }
+
+    /// Access cost in cycles
+    fn cycles(self) -> i32 {
+        match self {
+            Byte::Register(_) => 0,
+            Byte::RegisterIndirect(_)
+            | Byte::DoubleRegisterIndirect(_)
+            | Byte::DoubleRegisterIndirectInc(_)
+            | Byte::DoubleRegisterIndirectDec(_) => 4,
+            Byte::Immediate(_) => 4,
+            Byte::ImmediateIndirect(_) => 12,
+            Byte::ImmediateIndirectHigh(_) => 8,
+        }
+    }
+
+    /// Number of bytes added to instruction length
+    fn size_in_bytes(self) -> usize {
+        match self {
+            Byte::Immediate(_) | Byte::ImmediateIndirectHigh(_) => 1,
+            Byte::ImmediateIndirect(_) => 2,
+            _ => 0,
+        }
+    }
 }
 
 impl Display for Byte {
@@ -803,6 +827,14 @@ impl MutableByte {
     fn read(self, cpu: &mut Cpu) -> u8 {
         Byte::from(self).read(cpu)
     }
+
+    fn cycles(self) -> i32 {
+        Byte::from(self).cycles()
+    }
+
+    fn size_in_bytes(self) -> usize {
+        Byte::from(self).size_in_bytes()
+    }
 }
 
 impl Display for MutableByte {
@@ -828,6 +860,22 @@ impl Word {
             Word::DoubleRegister(register) => cpu.read_double_register(register),
             Word::Immediate(value) => value,
             Word::ImmediateIndirect(address) => cpu.memory.borrow().read_word(address),
+        }
+    }
+
+    fn cycles(self) -> i32 {
+        match self {
+            Word::StackPointer => 0,
+            Word::DoubleRegister(_) => 0,
+            Word::Immediate(_) => 8,
+            Word::ImmediateIndirect(_) => 12,
+        }
+    }
+
+    fn size_in_bytes(self) -> usize {
+        match self {
+            Word::Immediate(_) | Word::ImmediateIndirect(_) => 2,
+            _ => 0,
         }
     }
 }
@@ -872,6 +920,14 @@ impl MutableWord {
 
     fn read(self, cpu: &Cpu) -> u16 {
         Word::from(self).read(cpu)
+    }
+
+    fn cycles(self) -> i32 {
+        Word::from(self).cycles()
+    }
+
+    fn size_in_bytes(self) -> usize {
+        Word::from(self).size_in_bytes()
     }
 }
 
@@ -957,22 +1013,19 @@ enum Instruction {
 
 impl Instruction {
 
-    // TODO: Enhancement: derive size in bytes and timing from instruction itself
-    fn decode(address: u16, memory: &MemoryUnit) -> (Instruction, usize) {
-        let mut size_in_bytes = 0;
-
+    fn decode(mut address: u16, memory: &MemoryUnit) -> Instruction {
         macro_rules! get_next {
             (Byte) => {
                 {
-                    let next_byte = memory.read_byte(address + size_in_bytes as u16);
-                    size_in_bytes += 1;
+                    let next_byte = memory.read_byte(address);
+                    address += 1;
                     next_byte
                 }
             };
             (Word) => {
                 {
-                    let next_word = memory.read_word(address + size_in_bytes as u16);
-                    size_in_bytes += 2;
+                    let next_word = memory.read_word(address);
+                    address += 2;
                     next_word
                 }
             }
@@ -1015,7 +1068,7 @@ impl Instruction {
 
         use self::Instruction::*;
         let opcode = get_next!(Byte);
-        let instruction = match opcode {
+        match opcode {
 
             // ZAC (for faster ctrl+f)
 
@@ -1318,8 +1371,7 @@ impl Instruction {
             0xff => Rst(0x38),
 
             _ => panic!("Unimplemented opcode 0x{:02x} at address 0x{:04x}", opcode, address),
-        };
-        (instruction, size_in_bytes)
+        }
     }
 
     fn decode_cb(opcode: u8) -> Instruction {
@@ -1556,6 +1608,114 @@ impl Instruction {
             0xff => Set(7, MutableByte::Register(Register::A)),
 
             _ => panic!("Unimplemented CB opcode 0x{:02x}", opcode),
+        }
+    }
+
+    fn cycles(self, flags: &Flags) -> i32 {
+
+        let jump_cycles = |condition, taken_cycles| {
+            if flags.meets_condition(condition) {
+                taken_cycles
+            }
+            else {
+                0
+            }
+        };
+
+        use self::Instruction::*;
+        match self {
+
+            Nop => 4,
+
+
+            EnableInterrupts | DisableInterrupts => 4,
+
+
+            Inc8(operand) | Dec8(operand) => 4 + operand.cycles() * 2,
+
+            Add(operand)
+            | Adc(operand)
+            | Sub(operand)
+            | Sbc(operand)
+            | And(operand)
+            | Xor(operand)
+            | Or(operand)
+            | Cp(operand) => 4 + operand.cycles(),
+            Cpl => 4,
+
+
+            Inc16(_) | Dec16(_) | Add16(_, _) => 8,
+
+            Push(_) => 16,
+            Pop(_) => 12,
+
+
+
+
+            Jump(condition, JumpTarget::Absolute(target)) => 4 + target.cycles() + jump_cycles(condition, 4),
+            Jump(condition, JumpTarget::Relative(_)) => 8 + jump_cycles(condition, 4),
+
+            Call(condition, _) => 12 + jump_cycles(condition, 12),
+            Ret(None) => 16,
+            Ret(condition) => 8 + jump_cycles(condition, 12),
+            Reti => 16,
+
+
+            Rst(_) => 16,
+
+
+            Load8(dest, src) => 4 + dest.cycles() + src.cycles(),
+            Load16(dest, src) => 8 + dest.cycles() + src.cycles(),
+
+
+            Bit(_, operand) => 8 + operand.cycles() * 2,
+            Swap(operand)
+            | Set(_, operand)
+            | Res(_, operand) => 8 + operand.cycles() * 2,
+
+
+        }
+    }
+
+    fn size_in_bytes(self) -> usize {
+        use self::Instruction::*;
+        1 + match self {
+            Load8(dest, src) => dest.size_in_bytes() + src.size_in_bytes(),
+            Load16(dest, src) => dest.size_in_bytes() + src.size_in_bytes(),
+
+            Jump(_, JumpTarget::Relative(_)) => 1,
+            Jump(_, JumpTarget::Absolute(target)) => target.size_in_bytes(),
+            Call(_, _) => 2,
+
+
+
+            Add(operand)
+            | Adc(operand)
+            | Sub(operand)
+            | Sbc(operand)
+            | And(operand)
+            | Xor(operand)
+            | Or(operand)
+            | Cp(operand) => operand.size_in_bytes(),
+
+
+            Add16(dest, src) => dest.size_in_bytes() + src.size_in_bytes(),
+
+
+            Swap(_) |Bit(_, _) | Set(_, _) | Res(_, _) => 1,
+
+            Ret(_) => 0,
+            EnableInterrupts | DisableInterrupts => 0,
+
+            Inc8(operand) | Dec8(operand) => operand.size_in_bytes(),
+            Inc16(operand) | Dec16(operand) => operand.size_in_bytes(),
+            Push(operand) => operand.size_in_bytes(),
+            Pop(operand) => operand.size_in_bytes(),
+
+            Cpl => 0,
+            Nop => 0,
+            Ret(_) | Reti | Rst(_) => 0,
+
         }
     }
 
