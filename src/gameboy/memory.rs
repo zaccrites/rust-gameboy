@@ -2,41 +2,6 @@
 use super::cartridge::Cartridge;
 
 
-// These are private because the Cartridge won't own its own external
-// memory banks. It just provides the information so that the memory
-// unit can construct the correct number and type of banks.
-
-enum MemoryBankType {
-    Rom,
-    Ram,
-}
-
-
-struct MemoryBank {
-    bank_type: MemoryBankType,
-    contents: Box<[u8]>,
-}
-
-impl MemoryBank {
-    fn new(size: usize, bank_type: MemoryBankType) -> MemoryBank {
-        MemoryBank {
-            bank_type: bank_type,
-            contents: vec![0; size].into_boxed_slice(),
-        }
-    }
-
-    fn read_byte(&self, address: u16) -> u8 {
-        // TODO: What if address >= size?
-        self.contents[address as usize]
-    }
-
-    fn write_byte(&mut self, address: u16, value: u8) {
-        // TODO: What if address >= size?
-        self.contents[address as usize] = value
-    }
-}
-
-
 
 struct Rom<'a> {
     cartridge: &'a Cartridge
@@ -76,7 +41,6 @@ impl<'a> Rom<'a> {
 pub struct MemoryUnit<'a> {
 
     rom: Rom<'a>,
-    // rom_0: MemoryBank,
     // other rom banks?
 
 
@@ -99,6 +63,13 @@ pub struct MemoryUnit<'a> {
 
     /// IE register, CPU interrupt mask
     interrupt_enable_register: u8,
+
+
+
+    // The GPU will lock and unlock these at times
+    vram_locked: bool,
+    oam_locked: bool,
+
 }
 
 impl<'a> MemoryUnit<'a> {
@@ -130,19 +101,51 @@ impl<'a> MemoryUnit<'a> {
             io_ports: vec![IoPort::new(); 128].into_boxed_slice(),
 
             interrupt_enable_register: 0,
+
+            vram_locked: false,
+            oam_locked: false,
         }
+    }
+
+    pub fn read_oam(&self, address: usize) -> u8 {
+        if self.oam_locked { 0xff } else { self.oam[address] }
+    }
+
+    pub fn write_oam(&mut self, address: usize, value: u8) {
+        if ! self.oam_locked {
+            self.oam[address] = value;
+        }
+    }
+
+    pub fn read_vram(&self, address: usize) -> u8 {
+        if self.vram_locked { 0xff } else { self.vram[address] }
+    }
+
+    pub fn write_vram(&mut self, address: usize, value: u8) {
+        if ! self.vram_locked {
+            self.vram[address] = value;
+        }
+    }
+
+    pub fn read_range(&self, address: u16, length: usize) -> Box<[u8]> {
+        let mut data = Vec::with_capacity(length);
+        for i in 0..length {
+            let address = address + (i as u16);
+            data.push(self.read_byte(address));
+        }
+        data.into_boxed_slice()
     }
 
     pub fn read_byte(&self, address: u16) -> u8 {
         match address {
             0x0000 ... 0x7fff => self.rom.read_byte(address - 0x0000),
 
-            0x8000 ... 0x9fff => self.vram[(address - 0x8000) as usize],
+            0x8000 ... 0x9fff => self.read_vram((address - 0x8000) as usize),
             0xa000 ... 0xbfff => panic!("External RAM not yet supported!"),
             0xc000 ... 0xcfff => self.work_ram_0[(address - 0xc000) as usize],
             0xd000 ... 0xdfff => self.work_ram_1[(address - 0xd000) as usize],
             0xe000 ... 0xfdff => self.read_byte(address - 0xe000 + 0xc000),  // echoed
-            0xfe00 ... 0xfe9f => self.oam[(address - 0xfe00) as usize],
+            0xfe00 ... 0xfe9f => self.read_oam((address - 0xfe00) as usize),
             0xfea0 ... 0xfeff => 0,  // not usable
 
             // 0xff00 ... 0xff7f => panic!("IO Ports not yet supported!"),
@@ -170,12 +173,12 @@ impl<'a> MemoryUnit<'a> {
         match address {
             0x0000 ... 0x7fff => self.rom.write_byte(address, value),
 
-            0x8000 ... 0x9fff => self.vram[(address - 0x8000) as usize] = value,
+            0x8000 ... 0x9fff => self.write_vram((address - 0x8000) as usize, value),
             0xa000 ... 0xbfff => panic!("External RAM not yet supported!"),
             0xc000 ... 0xcfff => self.work_ram_0[(address - 0xc000) as usize] = value,
             0xd000 ... 0xdfff => self.work_ram_1[(address - 0xd000) as usize] = value,
             0xe000 ... 0xfdff => self.write_byte(address - 0xe000 + 0xc000, value),  // echoed
-            0xfe00 ... 0xfe9f => self.oam[(address - 0xfe00) as usize] = value,
+            0xfe00 ... 0xfe9f => self.write_oam((address - 0xfe00) as usize, value),
             0xfea0 ... 0xfeff => (),  // not usable
 
             // 0xff00 ... 0xff7f => panic!("IO Ports not yet supported!"),

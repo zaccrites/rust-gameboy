@@ -150,7 +150,8 @@ impl<'a> Cpu<'a> {
                 print!("   ");
             }
         }
-        println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   STACK_WORD={:04x}",
+        // println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   STACK_WORD={:04x}",
+        println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   ($0xff80)={:02x}",
             instruction.to_string(),
             self.program_counter,
             self.read_double_register(DoubleRegister::HL),
@@ -160,7 +161,8 @@ impl<'a> Cpu<'a> {
             if self.ime { 'Y' } else { 'N' },
             self.memory.borrow().get_io_read_value(0x44),
 
-            self.memory.borrow().read_word(self.stack_pointer.wrapping_add(2)),
+            // self.memory.borrow().read_word(self.stack_pointer.wrapping_add(2)),
+            self.memory.borrow().read_byte(0xff80),
         );
 
 
