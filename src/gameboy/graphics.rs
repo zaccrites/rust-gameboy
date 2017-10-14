@@ -321,15 +321,13 @@ impl<'a> Gpu<'a> {
         let background_tile_map1 = self.memory.borrow().read_range(0x9800, 1024);
         let background_tile_map2 = self.memory.borrow().read_range(0x9c00, 1024);
 
-        // TODO: Other (signed tile numbers) pattern table?
-        let background_tile_patterns: Vec<_> = (0..256).map(|tile_number| {
-            let address = 0x8000 + 16 * tile_number;
-            let tile_pattern_data = self.memory.borrow().read_range(address, 16);
 
+
+        fn decode_pattern(pattern_data: &[u8]) -> Box<[Color]> {
             let mut pixels = Vec::with_capacity(64);
             for i in 0..8 {
-                let byte1 = tile_pattern_data[2 * i];
-                let byte2 = tile_pattern_data[2 * i + 1];
+                let byte1 = pattern_data[2 * i];
+                let byte2 = pattern_data[2 * i + 1];
 
                 for bit in (0..8).rev() {
                     let bit1 = byte1 & (1 << bit) != 0;
@@ -345,8 +343,52 @@ impl<'a> Gpu<'a> {
                 }
             }
             pixels.into_boxed_slice()
+        }
+
+
+
+        // Pattern Table 1 (at 0x8000-8fff, pattern numbers from 0 to 255) can be used for sprites, background, and window.
+        // Pattern table 2 (at 0x8800-97ff, pattern numbers from -128 to 127) can be used for background and window only.
+
+        let pattern_table1: Vec<_> = (0..256).map(|tile_number| {
+            let address = 0x8000 + 16 * tile_number;
+            let tile_pattern_data = self.memory.borrow().read_range(address, 16);
+            decode_pattern(&tile_pattern_data)
         }).collect();
 
+        // TODO: Pattern Table 2
+
+
+
+        #[derive(Debug)]
+        struct SpriteData {
+            y: u8,
+            x: u8,
+            pattern_number: u8,
+            flags: u8,  // TODO: Extract This
+        }
+
+
+        // TODO: This is where 160 bytes of OAM comes from. It's 40 4-byte blocks.
+        // TODO: 8x16 sprite mode
+        let oam: Vec<_> = (0..40).map(|sprite_number| {
+            let address = 0xfe00 + 4 * sprite_number;
+            let data = self.memory.borrow().read_range(address, 4);
+
+            // println!(">>>>> read OAM data {:?}", data);
+            SpriteData { y: data[0], x: data[1], pattern_number: data[2], flags: data[3] }
+        }).collect();
+
+
+
+
+
+
+
+
+        // I think with the sprites, this function is slow again. Must look
+        // for a more performant way to process the data? Should profile it to
+        // be sure.
 
         // TODO: Window
 
@@ -384,11 +426,92 @@ impl<'a> Gpu<'a> {
                 // Actually, it doesn't. All the patterns are loaded once
                 // before this loop ever starts...
 
+
+                // TODO: Select this based on the LCDC control bit
+                let background_tile_patterns = &pattern_table1;
+
+
                 // TODO: Alternate tile map selector
                 let tile_pattern_number = background_tile_map1[tile_index] as usize;
                 let tile_pattern = &background_tile_patterns[tile_pattern_number];
 
-                let color = tile_pattern[tile_i];
+                let tile_color = tile_pattern[tile_i];
+
+
+                // This is always true.
+                let sprite_patterns = &pattern_table1;
+
+
+                // Now check to see if there is a sprite on the screen here.
+                // If there are multiple sprites then the one with the left-most
+                // X coordinate has priority. If they have the same X coordinate,
+                // then they are ordered according to the table ordering starting
+                // at 0xfe00, 0xfe04, etc.
+                //
+                // TODO: It would probably be better to check for a sprite first,
+                // and only then compute the color of the tile underneath if there
+                // is no sprite or if the sprite's pixel at that spot is transparent.
+                let mut color = tile_color;
+
+                // TODO: Only 10 sprites can be displayed per line. I'm tempted
+                // to add an option to disable this so it will show all the sprites.
+                for sprite_data in &oam {
+                    let x_flip = sprite_data.flags & 0x20 == 0x20;
+                    let y_flip = sprite_data.flags & 0x40 == 0x40;
+                    // TODO: Other flags
+
+                    let sprite_pattern = &sprite_patterns[sprite_data.pattern_number as usize];
+
+
+                    // if sprite_data.pattern_number == 0 {
+                    //     continue;
+                    // }
+                    // println!("Sprite: {:?}", sprite_data);
+                    // println!("sprite pattern number: {}", sprite_data.pattern_number);
+
+
+                    // // TODO: ???
+                    // let sprite_y = (display_y + sprite_data.y as u32) % 8;
+                    // let sprite_x = (display_x + sprite_data.x as u32) % 8;
+                    // let sprite_i = ((sprite_y * 8) + sprite_x) as usize;  // Pixel index into tile pattern
+
+                    // Check to see if the current pixel is on this sprite
+                    let sprite_position_x = sprite_data.x - 8;
+                    let sprite_position_y = sprite_data.y - 16;  // I guess the position is on the right/bottom of the sprite?
+
+                    let in_x_window = (display_x as u8) >= sprite_position_x && (display_x as u8) < sprite_position_x + 8;
+                    let in_y_window = (display_y as u8) >= sprite_position_y && (display_y as u8) < sprite_position_y + 8;  // TODO: 8x16, also this method sucks
+                    if in_x_window && in_y_window {
+                        let sprite_x = ((display_x as u8) - sprite_position_x) % 8;
+                        let sprite_y = ((display_y as u8) - sprite_position_y) % 8;  // TODO: 8x16
+                        let sprite_i = ((sprite_y * 8) + sprite_x) as usize;  // Pixel index into sprite pattern
+
+                        let sprite_color = sprite_pattern[sprite_i];
+
+                        // If the priority flag is 0 then the sprite covers
+                        // the background and window no matter what. If it's
+                        // 1 then it covers them only if the background/window
+                        // pixel is the Lightest (00) color.
+                        //
+                        // TODO: Can these be combined somehow?
+                        if sprite_data.flags & 0x80 == 0 {
+                            color = sprite_color;
+                        }
+                        else if let Color::Lightest = tile_color {
+                            color = sprite_color;
+                        }
+
+
+
+
+                    }
+
+
+
+                }
+
+
+
                 let (red, green, blue) = color.to_rgb();
                 pixel_data.push(blue);
                 pixel_data.push(green);
@@ -396,6 +519,8 @@ impl<'a> Gpu<'a> {
                 pixel_data.push(0xff);  // Alpha
             }
         }
+
+
 
 
 

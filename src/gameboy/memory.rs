@@ -65,6 +65,10 @@ pub struct MemoryUnit<'a> {
     interrupt_enable_register: u8,
 
 
+    // UGH UGH UGH
+    interrupt_flag_register: u8,
+
+
 
     // The GPU will lock and unlock these at times
     vram_locked: bool,
@@ -102,6 +106,10 @@ impl<'a> MemoryUnit<'a> {
 
             interrupt_enable_register: 0,
 
+
+            interrupt_flag_register: 0,
+
+
             vram_locked: false,
             oam_locked: false,
         }
@@ -136,6 +144,13 @@ impl<'a> MemoryUnit<'a> {
         data.into_boxed_slice()
     }
 
+    pub fn write_range(&mut self, address: u16, data: &[u8]) {
+        for (i, byte) in data.iter().enumerate() {
+            let address = address + (i as u16);
+            self.write_byte(address, *byte);
+        }
+    }
+
     pub fn read_byte(&self, address: u16) -> u8 {
         match address {
             0x0000 ... 0x7fff => self.rom.read_byte(address - 0x0000),
@@ -154,6 +169,11 @@ impl<'a> MemoryUnit<'a> {
             //     0
             // },
 
+
+            // Ugh Ugh Ugh
+            0xff0f => self.interrupt_flag_register,
+
+
             // TODO: I don't think this whole region is I/O. Investigate.
             0xff00 ... 0xff7f => self.io_ports[(address - 0xff00) as usize].read_value,
 
@@ -170,6 +190,12 @@ impl<'a> MemoryUnit<'a> {
     }
 
     pub fn write_byte(&mut self, address: u16, value: u8) {
+
+        // TODO: TETRIS PATCH. REMOVE THIS PLEASE!
+        if address == 0xff80 {
+            return;
+        }
+
         match address {
             0x0000 ... 0x7fff => self.rom.write_byte(address, value),
 
@@ -185,6 +211,12 @@ impl<'a> MemoryUnit<'a> {
             // 0xff00 ... 0xff7f => {
             //     println!("Tried to write {} to I/O port at 0x{:04x}", value, address);
             // },
+
+
+            // Ugh. What to do about this? It's not an I/O port at all!
+            0xff0f => self.interrupt_flag_register = value,
+
+
             0xff00 ... 0xff7f => self.io_ports[(address - 0xff00) as usize].written_value = Some(value),
 
             0xff80 ... 0xfffe => self.high_ram[(address - 0xff80) as usize] = value,

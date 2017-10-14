@@ -5,6 +5,7 @@ use std::fmt::{Formatter, Display, Result as FmtResult};
 use std::convert::From;
 
 use gameboy::memory::MemoryUnit;
+use gameboy::interrupts::Interrupt;
 
 
 
@@ -86,6 +87,10 @@ enum ImeChangeStatus {
 
 
 
+
+
+
+
 pub struct Cpu<'a> {
     program_counter: u16,
     stack_pointer: u16,
@@ -98,8 +103,11 @@ pub struct Cpu<'a> {
     ime_change_status: ImeChangeStatus,
 
 
+    halted: bool,
+
 
     stepping: bool,
+    printing: bool,
 }
 
 impl<'a> Cpu<'a> {
@@ -112,8 +120,10 @@ impl<'a> Cpu<'a> {
             ime: false,
             ime_change_status: ImeChangeStatus::None,
 
+            halted: false,
 
             stepping: false,
+            printing: false,
         }
     }
 
@@ -133,43 +143,116 @@ impl<'a> Cpu<'a> {
         // TODO: Reset IO ports
         self.ime = true;
         self.ime_change_status = ImeChangeStatus::None;
+
+        self.halted = false;
     }
 
-    pub fn fetch_and_execute(&mut self) -> i32 {
+    pub fn step(&mut self) -> i32 {
+
+
+        if self.ime {
+            let pending_interrupt = Interrupt::get_pending_interrupt(&self.memory.borrow());
+            if let Some(interrupt) = pending_interrupt {
+                self.halted = false;
+                self.handle_interrupt(interrupt);
+            }
+        }
+
+        let cycles = if self.halted {
+            0
+        }
+        else {
+
+            // use std::time::{Instant, Duration};
+            // let start_time = Instant::now();
+
+            // self.fetch_and_execute()
+            let result = self.fetch_and_execute();
+
+            // let end_time = Instant::now();
+            // let duration = end_time - start_time;
+            // println!("fetch_and_execute time: {} ms", (duration.subsec_nanos() as f32) / 1_000_000f32);
+            result
+        };
+
+        // self.step_io_registers(cycles);
+
+        cycles
+    }
+
+    fn handle_interrupt(&mut self, interrupt: Interrupt) {
+        // Disable all interrupts and clear the handled interrupt's request flag.
+        self.ime = false;
+        interrupt.reset(&mut self.memory.borrow_mut());
+        // Push the current program counter and then jump to the interrupt
+        // service routine address (ISR).
+        let pc = self.program_counter;
+        self.push_word(pc);
+        self.program_counter = interrupt.get_handler_address();
+        // It is expected that the ISR will conclude by re-enabling interrupts
+        // via the RETI instruction.
+    }
+
+    fn fetch_and_execute(&mut self) -> i32 {
         let instruction = Instruction::decode(self.program_counter, &self.memory.borrow());
 
         let size_in_bytes = instruction.size_in_bytes();
 
-        // TODO: What is a better way to do this?
-        for i in 0..3 {
-            if i < size_in_bytes {
-                let address = self.program_counter + i as u16;
-                print!("{:02x} ", self.memory.borrow().read_byte(address));
-            }
-            else {
-                print!("   ");
+
+        // self.printing = true;
+        // self.printing = (self.program_counter < 0x036c || self.program_counter > 0x036f);
+        // self.print
+
+
+
+        let mut breakpoint = Some(0x2617);
+        breakpoint = None;
+        if let Some(address) = breakpoint {
+            if address == self.program_counter {
+                self.stepping = true;
+                self.printing = true;
             }
         }
-        // println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   STACK_WORD={:04x}",
-        println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   ($0xff80)={:02x}",
-            instruction.to_string(),
-            self.program_counter,
-            self.read_double_register(DoubleRegister::HL),
-            self.read_double_register(DoubleRegister::AF),
-            self.read_double_register(DoubleRegister::BC),
-
-            if self.ime { 'Y' } else { 'N' },
-            self.memory.borrow().get_io_read_value(0x44),
-
-            // self.memory.borrow().read_word(self.stack_pointer.wrapping_add(2)),
-            self.memory.borrow().read_byte(0xff80),
-        );
 
 
+        // TODO: Interesting debugger in the form of a browser-based WebSockets
+        // version. I want to do this too. Maybe not in Elm, but a browser-based
+        // Debugger is a great idea. This is similar to the "remote" emulator
+        // idea I had earlier.
+        if self.printing {
+            // TODO: What is a better way to do this?
+            for i in 0..3 {
+                if i < size_in_bytes {
+                    let address = self.program_counter + i as u16;
+                    print!("{:02x} ", self.memory.borrow().read_byte(address));
+                }
+                else {
+                    print!("   ");
+                }
+            }
+            // println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}   IME={} LY={}   STACK_WORD={:04x}",
+            println!("  {:<15}    PC={:04x}   HL={:04x}  AF={:04x}  BC={:04x}  DE={:04x}  SP={:04x}  IME={} LY={:03}   IE={:02x}  IF={:02x}",
+                instruction.to_string(),
+                self.program_counter,
+                self.read_double_register(DoubleRegister::HL),
+                self.read_double_register(DoubleRegister::AF),
+                self.read_double_register(DoubleRegister::BC),
+                self.read_double_register(DoubleRegister::DE),
+                self.stack_pointer,
 
-        if self.stepping {
-            pause();
+                if self.ime { 'Y' } else { 'N' },
+                self.memory.borrow().get_io_read_value(0x44),
+
+                self.memory.borrow().read_byte(super::interrupts::INT_ENABLE_ADDRESS),
+                self.memory.borrow().read_byte(super::interrupts::INT_FLAG_ADDRESS),
+
+                // self.memory.borrow().read_word(self.stack_pointer.wrapping_add(2)),
+            );
+            if self.stepping {
+                pause();
+            }
         }
+
 
 
         self.program_counter += size_in_bytes as u16;
@@ -234,15 +317,26 @@ impl<'a> Cpu<'a> {
             Load16(dest, src) => self.load16(dest, src),
 
             Nop => (),
+
+            Halt => self.halt(),
+
             Jump(condition, address) => self.jump(condition, address),
+
+
+            Rlca => self.rlca(),
+            // Rla => self.rla(),
 
 
             // CB
             Swap(operand) => self.swap(operand),
+            Sla(operand) => self.sla(operand),
+            Sra(operand) => self.sra(operand),
+            Srl(operand) => self.srl(operand),
             Bit(bit, operand) => self.bit(bit, operand),
             Set(bit, operand) => self.set(bit, operand),
             Res(bit, operand) => self.res(bit, operand),
 
+            _ => panic!("Unimplemented instruction {} at 0x{:04x}", instruction, self.program_counter - instruction.size_in_bytes() as u16),
         }
     }
 
@@ -316,6 +410,23 @@ impl<'a> Cpu<'a> {
 
 
 
+    fn halt(&mut self) {
+
+        // WARNING:
+        //  The instruction immediately following the
+        //   HALT instruction is "skipped" when interrupts are
+        //   disabled (DI) on the GB,GBP, and SGB. As a result,
+        //   always put a NOP after the HALT instruction. This
+        //   instruction skipping doesn't occur when interrupts
+        //   are enabled (EI).
+        //   This "skipping" does not seem to occur on the
+        //   GameBoy Color even in regular GB mode. ($143=$00)
+
+        self.halted = true;
+
+    }
+
+
 
     fn push(&mut self, operand: Word) {
         let operand = operand.read(self);
@@ -356,6 +467,67 @@ impl<'a> Cpu<'a> {
         operand.write(start_value & !(1 << bit), self);
     }
 
+
+    /// Shift left into carry; LSB = 0.
+    fn sla(&mut self, operand: MutableByte) {
+        let start_value = operand.read(self);
+        let new_value = start_value << 1;
+        operand.write(new_value, self);
+
+        self.registers.flags.zero = new_value == 0;
+        self.registers.flags.negative = false;
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = start_value & 0x80 == 0x80;
+    }
+
+    /// Shift right into carry; MSB does not change.
+    fn sra(&mut self, operand: MutableByte) {
+        let start_value = operand.read(self);
+        let new_value = (start_value >> 1) & 0x7f | (start_value & 0x80);
+        operand.write(new_value, self);
+
+        self.registers.flags.zero = new_value == 0;
+        self.registers.flags.negative = false;
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = start_value & 0x01 == 0x01;
+    }
+
+    /// Shift right into carry; MSB = 0.
+    fn srl(&mut self, operand: MutableByte) {
+        let start_value = operand.read(self);
+        let new_value = start_value >> 1;
+        operand.write(new_value, self);
+
+        self.registers.flags.zero = new_value == 0;
+        self.registers.flags.negative = false;
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = start_value & 0x01 == 0x01;
+    }
+
+
+    fn rlca(&mut self) {
+        let start_value = self.registers.a;
+        let new_value = self.registers.a.rotate_left(1);
+        self.registers.a = new_value;
+
+        self.registers.flags.zero = new_value == 0;
+        self.registers.flags.negative = false;
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = start_value & 0x80 == 0x80;
+
+    }
+
+    fn rla(&mut self) {
+        let start_value = self.registers.a;
+        let carry_bit = self.registers.flags.carry as u8;
+        let new_value = (start_value << 1) | carry_bit;
+        self.registers.a = new_value;
+
+        self.registers.flags.zero = new_value == 0;
+        self.registers.flags.negative = false;
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = start_value & 0x80 == 0x80;
+    }
 
 
 
@@ -525,7 +697,7 @@ impl<'a> Cpu<'a> {
 
         operand.write(new_value, self);
         self.registers.flags.zero = new_value == 0;
-        self.registers.flags.negative = false;
+        self.registers.flags.negative = true;
         self.registers.flags.half_carry = half_carry;
         // Carry flag not affected
     }
@@ -1004,6 +1176,12 @@ enum Instruction {
     Nop,
     Jump(Option<FlagCondition>, JumpTarget),
 
+    Halt,
+
+
+    Rlca,
+    Rla,
+
 
     // CB
     Swap(MutableByte),
@@ -1011,6 +1189,9 @@ enum Instruction {
     Set(u8, MutableByte),
     Res(u8, MutableByte),
 
+    Sla(MutableByte),
+    Sra(MutableByte),
+    Srl(MutableByte),
 }
 
 impl Instruction {
@@ -1109,7 +1290,10 @@ impl Instruction {
             0x26 => Load8(register!(mut H), immediate!(Byte)),
             0x36 => Load8(double_register_indirect!(mut HL), immediate!(Byte)),
 
-            // 7
+            0x07 => Rlca,
+            0x17 => Rla,
+            //
+            //
 
             //
             0x18 => Jump(flag!(*), immediate!(JumpTarget Relative)),
@@ -1208,7 +1392,7 @@ impl Instruction {
             0x73 => Load8(double_register_indirect!(mut HL), register!(E)),
             0x74 => Load8(double_register_indirect!(mut HL), register!(H)),
             0x75 => Load8(double_register_indirect!(mut HL), register!(L)),
-            // 0x76 => Halt,
+            0x76 => Halt,
             0x77 => Load8(double_register_indirect!(mut HL), register!(A)),
 
             0x78 => Load8(register!(mut A), register!(B)),
@@ -1381,6 +1565,26 @@ impl Instruction {
         match opcode {
 
 
+
+            0x20 => Sla(MutableByte::Register(Register::B)),
+            0x21 => Sla(MutableByte::Register(Register::C)),
+            0x22 => Sla(MutableByte::Register(Register::D)),
+            0x23 => Sla(MutableByte::Register(Register::E)),
+            0x24 => Sla(MutableByte::Register(Register::H)),
+            0x25 => Sla(MutableByte::Register(Register::L)),
+            0x26 => Sla(MutableByte::DoubleRegisterIndirect(DoubleRegister::HL)),
+            0x27 => Sla(MutableByte::Register(Register::A)),
+
+            0x28 => Sra(MutableByte::Register(Register::B)),
+            0x29 => Sra(MutableByte::Register(Register::C)),
+            0x2a => Sra(MutableByte::Register(Register::D)),
+            0x2b => Sra(MutableByte::Register(Register::E)),
+            0x2c => Sra(MutableByte::Register(Register::H)),
+            0x2d => Sra(MutableByte::Register(Register::L)),
+            0x2e => Sra(MutableByte::DoubleRegisterIndirect(DoubleRegister::HL)),
+            0x2f => Sra(MutableByte::Register(Register::A)),
+
+
             0x30 => Swap(MutableByte::Register(Register::B)),
             0x31 => Swap(MutableByte::Register(Register::C)),
             0x32 => Swap(MutableByte::Register(Register::D)),
@@ -1389,6 +1593,15 @@ impl Instruction {
             0x35 => Swap(MutableByte::Register(Register::L)),
             0x36 => Swap(MutableByte::DoubleRegisterIndirect(DoubleRegister::HL)),
             0x37 => Swap(MutableByte::Register(Register::A)),
+
+            0x38 => Srl(MutableByte::Register(Register::B)),
+            0x39 => Srl(MutableByte::Register(Register::C)),
+            0x3a => Srl(MutableByte::Register(Register::D)),
+            0x3b => Srl(MutableByte::Register(Register::E)),
+            0x3c => Srl(MutableByte::Register(Register::H)),
+            0x3d => Srl(MutableByte::Register(Register::L)),
+            0x3e => Srl(MutableByte::DoubleRegisterIndirect(DoubleRegister::HL)),
+            0x3f => Srl(MutableByte::Register(Register::A)),
 
 
 
@@ -1629,6 +1842,10 @@ impl Instruction {
 
             Nop => 4,
 
+            Halt => 4,
+
+            Rlca | Rla => 4,
+
 
             EnableInterrupts | DisableInterrupts => 4,
 
@@ -1672,6 +1889,9 @@ impl Instruction {
 
             Bit(_, operand) => 8 + operand.cycles() * 2,
             Swap(operand)
+            | Sla(operand)
+            | Sra(operand)
+            | Srl(operand)
             | Set(_, operand)
             | Res(_, operand) => 8 + operand.cycles() * 2,
 
@@ -1704,7 +1924,8 @@ impl Instruction {
             Add16(dest, src) => dest.size_in_bytes() + src.size_in_bytes(),
 
 
-            Swap(_) |Bit(_, _) | Set(_, _) | Res(_, _) => 1,
+            Swap(_) | Sra(_) | Sla(_) | Srl(_) => 1 ,
+            Bit(_, _) | Set(_, _) | Res(_, _) => 1,
 
             Ret(_) => 0,
             EnableInterrupts | DisableInterrupts => 0,
@@ -1716,7 +1937,9 @@ impl Instruction {
 
             Cpl => 0,
             Nop => 0,
+            Halt => 0,
             Ret(_) | Reti | Rst(_) => 0,
+            Rlca | Rla => 0,
 
         }
     }
@@ -1776,8 +1999,18 @@ impl Display for Instruction {
 
             Nop => write!(f, "NOP"),
 
+            Halt => write!(f, "HALT"),
+
+            Rlca => write!(f, "RLCA"),
+            Rla => write!(f, "RLA"),
+
+
 
             Swap(operand) => write!(f, "SWAP {}", operand),
+            Sla(operand) => write!(f, "SLA {}", operand),
+            Sra(operand) => write!(f, "SRA {}", operand),
+            Srl(operand) => write!(f, "SRL {}", operand),
+
             Bit(bit, operand) => write!(f, "BIT {}, {}", bit, operand),
             Set(bit, operand) => write!(f, "SET {}, {}", bit, operand),
             Res(bit, operand) => write!(f, "RES {}, {}", bit, operand),

@@ -33,6 +33,25 @@ impl Cartridge {
         let mut contents = Vec::new();
         f.read_to_end(&mut contents).expect("error reading file");
 
+        // TODO: Make this a fn like title
+        // Or return a Result for unsupported cartridge/MBC types?
+        let cartridge_type_code = contents[0x0147];
+        if cartridge_type_code != 0x00 {
+            panic!("Unsupported cartridge type {:02x}h", cartridge_type_code);
+        }
+
+        let rom_size_code = contents[0x0148];
+        if rom_size_code != 0 {
+            panic!("ROM SIZE CODE WAS {:02x}h", rom_size_code);
+        }
+
+        let ram_size_code = contents[0x0149];
+        if ram_size_code != 0 {
+            panic!("RAM SIZE CODE WAS {:02x}h", ram_size_code);
+        }
+
+
+
         Cartridge {
             rom: contents.into_boxed_slice(),
         }
