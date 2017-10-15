@@ -204,15 +204,20 @@ impl<'a> Cpu<'a> {
         // self.print
 
 
+        // self.printing = true;
+        // self.stepping = true;
 
-        let mut breakpoint = Some(0x2617);
-        breakpoint = None;
-        if let Some(address) = breakpoint {
-            if address == self.program_counter {
-                self.stepping = true;
-                self.printing = true;
-            }
-        }
+        // let mut breakpoint = Some(0x2a24);
+        // // breakpoint = None;
+        // if let Some(address) = breakpoint {
+        //     if address == self.program_counter {
+        //         // self.stepping = true;
+        //         self.printing = true;
+        //     }
+        // }
+
+
+        // self.printing = self.program_counter == 0x2a24;
 
 
         // TODO: Interesting debugger in the form of a browser-based WebSockets
@@ -294,6 +299,8 @@ impl<'a> Cpu<'a> {
             Cp(operand) => self.cp(operand),
 
             Cpl => self.cpl(),
+
+            Daa => self.daa(),
 
             EnableInterrupts => self.ei(),
             DisableInterrupts => self.di(),
@@ -407,6 +414,37 @@ impl<'a> Cpu<'a> {
     }
 
 
+
+
+    fn daa(&mut self) {
+
+        // When this instruction is executed, the A register is BCD
+        // corrected using the contents of the flags. The exact process
+        // is the following:
+        //      if the least significant four bits of A contain
+        //      a non-BCD digit (i. e. it is greater than 9) or
+        //      the H flag is set, then $06 is added to the register.
+        //      Then the four most significant bits are checked.
+        //      If this more significant digit also happens to be
+        //      greater than 9 or the C flag is set, then $60 is added.
+        //   - http://z80-heaven.wikidot.com/instructions-set:daa
+
+        let less_significant_nibble = self.registers.a & 0x0f;
+        if less_significant_nibble > 9 || self.registers.flags.half_carry {
+            self.registers.a += 0x06;
+        }
+
+        let more_significant_nibble = self.registers.a >> 4;
+        let do_second_addition = more_significant_nibble > 9 || self.registers.flags.carry;
+        if do_second_addition {
+            self.registers.a += 0x60;
+        }
+
+        self.registers.flags.zero = self.registers.a == 0;
+        // Negative flag not affected.
+        self.registers.flags.half_carry = false;
+        self.registers.flags.carry = do_second_addition;
+    }
 
 
 
@@ -1163,6 +1201,7 @@ enum Instruction {
 
     Cpl,
 
+    Daa,
 
     Push(Word),
     Pop(MutableWord),
@@ -1292,7 +1331,7 @@ impl Instruction {
 
             0x07 => Rlca,
             0x17 => Rla,
-            //
+            0x27 => Daa,
             //
 
             //
@@ -1862,6 +1901,8 @@ impl Instruction {
             | Cp(operand) => 4 + operand.cycles(),
             Cpl => 4,
 
+            Daa => 4,
+
 
             Inc16(_) | Dec16(_) | Add16(_, _) => 8,
 
@@ -1936,6 +1977,7 @@ impl Instruction {
             Pop(operand) => operand.size_in_bytes(),
 
             Cpl => 0,
+            Daa => 0,
             Nop => 0,
             Halt => 0,
             Ret(_) | Reti | Rst(_) => 0,
@@ -1966,6 +2008,8 @@ impl Display for Instruction {
             Cp(operand) => write!(f, "CP {}", operand),
 
             Cpl => write!(f, "CPL"),
+
+            Daa => write!(f, "DAA"),
 
             EnableInterrupts => write!(f, "EI"),
             DisableInterrupts => write!(f, "DI"),

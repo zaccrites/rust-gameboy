@@ -5,10 +5,14 @@ use std::cell::RefCell;
 use gameboy::memory::MemoryUnit;
 
 
+const DIV_PORT_NUMBER: u8 = 0x04;       // Timer Divider Register
+const TIMA_PORT_NUMBER: u8 = 0x05;      // Timer Counter Register
+const TMA_PORT_NUMBER: u8 = 0x06;       // Timer Modulo Register
+const TAC_PORT_NUMBER: u8 = 0x07;       // Timer Control Register
+
 
 // TODO: Extract this 1_000_000 cycles per second constant somewhere else
 const DIVIDER_CYCLES: i32 = 1_000_000 / 16384;
-const DIVIDER_PORT_NUMBER: u8 = 0x04;
 
 pub struct Timer<'a> {
     memory: Rc<RefCell<MemoryUnit<'a>>>,
@@ -35,7 +39,7 @@ impl<'a> Timer<'a> {
 
     pub fn step(&mut self, cycles: i32) {
 
-        if let Some(_) = self.memory.borrow_mut().check_for_io_write(DIVIDER_PORT_NUMBER) {
+        if let Some(_) = self.memory.borrow_mut().check_for_io_write(DIV_PORT_NUMBER) {
             self.divider_value = 0;
         }
         self.divider_cycles_remaining -= cycles;
@@ -43,7 +47,7 @@ impl<'a> Timer<'a> {
             self.divider_cycles_remaining += DIVIDER_CYCLES;
             self.divider_value = self.divider_value.wrapping_add(1);
         }
-        self.memory.borrow_mut().set_io_read_value(DIVIDER_PORT_NUMBER, self.divider_value);
+        self.memory.borrow_mut().set_io_read_value(DIV_PORT_NUMBER, self.divider_value);
 
     }
 

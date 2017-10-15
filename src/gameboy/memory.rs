@@ -191,11 +191,6 @@ impl<'a> MemoryUnit<'a> {
 
     pub fn write_byte(&mut self, address: u16, value: u8) {
 
-        // TODO: TETRIS PATCH. REMOVE THIS PLEASE!
-        if address == 0xff80 {
-            return;
-        }
-
         match address {
             0x0000 ... 0x7fff => self.rom.write_byte(address, value),
 
@@ -219,7 +214,10 @@ impl<'a> MemoryUnit<'a> {
 
             0xff00 ... 0xff7f => self.io_ports[(address - 0xff00) as usize].written_value = Some(value),
 
-            0xff80 ... 0xfffe => self.high_ram[(address - 0xff80) as usize] = value,
+            // 0xff80 ... 0xfffe => self.high_ram[(address - 0xff80) as usize] = value,
+            0xff80 ... 0xfffe => {
+                self.high_ram[(address - 0xff80) as usize] = value;
+            },
             0xffff            => self.interrupt_enable_register = value,
             _ => unreachable!(),
         }

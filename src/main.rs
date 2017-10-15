@@ -116,7 +116,23 @@ fn main() {
         let start_time = Instant::now();
 
         // Get input state
-        let mut input_state = InputState::default();
+        // TODO: Make this configurable
+        let input_state = {
+            use sdl2::keyboard::{KeyboardState, Scancode};
+            let keyboard_state = KeyboardState::new(&event_pump);
+            let mut input_state = InputState::default();
+            if keyboard_state.is_scancode_pressed(Scancode::A) { input_state.a = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::S) { input_state.b = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::Return) { input_state.start = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::RShift) { input_state.select = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::Left) { input_state.left = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::Right) { input_state.right = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::Up) { input_state.up = ButtonState::Pressed; }
+            if keyboard_state.is_scancode_pressed(Scancode::Down) { input_state.down = ButtonState::Pressed; }
+            input_state
+        };
+
+
         for event in event_pump.poll_iter() {
             use sdl2::event::Event::*;
             use sdl2::keyboard::Keycode::*;
@@ -126,22 +142,22 @@ fn main() {
 
                 KeyDown { keycode: Some(keycode), repeat, keymod, .. } => match keycode {
                     Escape | Q => { quit = true },
-
-                    A => input_state.a = ButtonState::Pressed,
-                    Z => input_state.b = ButtonState::Pressed,
-                    Enter => input_state.start = ButtonState::Pressed,
-                    RightShift => input_state.select = ButtonState::Pressed,
-                    Left => input_state.left = ButtonState::Pressed,
-                    Right => input_state.right = ButtonState::Pressed,
-                    Up => input_state.up = ButtonState::Pressed,
-                    Down => input_state.down = ButtonState::Pressed,
-
                     _ => ()
                 },
 
                 _ => {},
             }
         }
+
+        // match input_state {
+        //     InputState { left: ButtonState::Pressed, .. } |
+        //     InputState { right: ButtonState::Pressed, .. } |
+        //     InputState { up: ButtonState::Pressed, .. } |
+        //     InputState { down: ButtonState::Pressed, .. } |
+        //     InputState { a: ButtonState::Pressed, .. } =>
+        //         println!("{:?}", input_state),
+        //     _ => (),
+        // }
 
         // Execute instructions until the next frame draw time
         loop {
@@ -154,11 +170,13 @@ fn main() {
             //
 
             // print!("{:04}: ", i + 1);
+            joypad.step(&input_state);
+
+
             let cycles = cpu.step();
 
             dma.step(cycles);
 
-            joypad.step(cycles, &input_state);
 
             timer.step(cycles);
 

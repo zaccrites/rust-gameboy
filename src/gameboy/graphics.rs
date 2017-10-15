@@ -15,7 +15,6 @@ pub const DISPLAY_RESOLUTION_Y: u32 = 144;
 
 
 
-
 #[derive(Debug, Clone, Copy)]
 enum Color {
     Lightest,
@@ -27,22 +26,40 @@ enum Color {
 
 impl Color {
     // TODO: Load colors from a config file for different styles, like BGB
-    // fn to_rgb(self) -> (u8, u8, u8) {
-    //     match self {
-    //         Color::Lightest => (224, 248, 208),
-    //         Color::Lighter  => (136, 192, 112),
-    //         Color::Darker   => (52, 104, 86),
-    //         Color::Darkest  => (8, 24, 32),
-    //     }
-    // }
 
     fn to_rgb(self) -> (u8, u8, u8) {
+
+        // GRAY
+        // match self {
+        //     Color::Lightest => (232, 232, 232),
+        //     Color::Lighter  => (160, 160, 160),
+        //     Color::Darker   => (88, 88, 88),
+        //     Color::Darkest  => (16, 16, 16),
+        // }
+
+        // GREEN
         match self {
-            Color::Lightest => (232, 232, 232),
-            Color::Lighter  => (160, 160, 160),
-            Color::Darker   => (88, 88, 88),
-            Color::Darkest  => (16, 16, 16),
+            Color::Lightest => (224, 248, 208),
+            Color::Lighter  => (136, 192, 112),
+            Color::Darker   => (52, 104, 86),
+            Color::Darkest  => (8, 24, 32),
         }
+
+        // RED
+        // match self {
+        //     Color::Lightest => (255, 192, 192),
+        //     Color::Lighter  => (255, 96, 96),
+        //     Color::Darker   => (192, 0, 0),
+        //     Color::Darkest  => (96, 0 ,0),
+        // }
+
+        // YELLOW
+        // match self {
+        //     Color::Lightest => (248, 240, 120),
+        //     Color::Lighter  => (176, 168, 72),
+        //     Color::Darker   => (104, 104, 48),
+        //     Color::Darkest  => (32, 32, 16),
+        // }
     }
 
 
