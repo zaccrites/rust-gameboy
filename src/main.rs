@@ -173,7 +173,16 @@ fn main() {
             joypad.step(&input_state);
 
 
-            let cycles = cpu.step();
+            // If the CPU is halted, it currently returns 0 cycles.
+            // How many cycles does the CPU spend when halted? 0? Should
+            // this choose something else?
+            // TODO: Fix this
+            let mut cycles = cpu.step();
+            if cycles == 0 {
+                // CPU is halted or stopped or whatever
+                cycles = 4;
+            }
+
 
             dma.step(cycles);
 
@@ -186,6 +195,13 @@ fn main() {
 
             if do_draw_frame {
                 break;
+            }
+
+
+
+            let timeout = 500;
+            if (Instant::now() - start_time > Duration::from_millis(timeout)) {
+                // panic!("Time between vblanks exceeded {} ms", timeout);
             }
         }
 

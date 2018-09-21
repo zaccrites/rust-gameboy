@@ -153,7 +153,12 @@ impl<'a> Cpu<'a> {
         if self.ime {
             let pending_interrupt = Interrupt::get_pending_interrupt(&self.memory.borrow());
             if let Some(interrupt) = pending_interrupt {
+
+                // if self.halted {
+                //     println!("Was halted, now un-halted.");
+                // }
                 self.halted = false;
+
                 self.handle_interrupt(interrupt);
             }
         }

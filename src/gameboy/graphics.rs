@@ -126,6 +126,10 @@ pub struct Gpu<'a> {
 
     clocks: i64,
 
+
+
+    lcdc: u8,
+
 }
 
 impl<'a> Gpu<'a> {
@@ -140,6 +144,9 @@ impl<'a> Gpu<'a> {
 
             scanline: 0,
             clocks: 0,
+
+
+            lcdc: 0,
         }
 
 
@@ -147,6 +154,7 @@ impl<'a> Gpu<'a> {
     }
 
     pub fn reset(&mut self) {
+        self.lcdc = 0;
         self.set_mode(Mode::OamRead);
     }
 
@@ -266,6 +274,16 @@ impl<'a> Gpu<'a> {
 
 
 
+        {
+            let mut memory = self.memory.borrow_mut();
+            if let Some(lcdc) = memory.check_for_io_write(LCDC_PORT_NUMBER) {
+                self.lcdc = lcdc;
+                memory.set_io_read_value(LCDC_PORT_NUMBER, self.lcdc);
+            }
+        }
+
+
+
         drawframe
 
 
@@ -330,6 +348,7 @@ impl<'a> Gpu<'a> {
     // Or maybe it's not too slow... wtf
     pub fn get_pixel_data(&self) -> Box<[u8]> {
 
+
         // use std::time::{Instant, Duration};
         // let start_time = Instant::now();
 
@@ -374,7 +393,11 @@ impl<'a> Gpu<'a> {
         }).collect();
 
         // TODO: Pattern Table 2
-
+        let pattern_table2: Vec<_> = (0..256).map(|tile_number| {
+            let address = 0x8800 + 16 * tile_number;
+            let tile_pattern_data = self.memory.borrow().read_range(address, 16);
+            decode_pattern(&tile_pattern_data)
+        }).collect();
 
 
         #[derive(Debug)]
@@ -414,6 +437,8 @@ impl<'a> Gpu<'a> {
         for display_y in 0..DISPLAY_RESOLUTION_Y {
             for display_x in 0..DISPLAY_RESOLUTION_X {
 
+
+
                 // TODO: Scrolling
                 let tile_y = display_y % 8;
                 let tile_x = display_x % 8;
@@ -444,13 +469,41 @@ impl<'a> Gpu<'a> {
                 // before this loop ever starts...
 
 
-                // TODO: Select this based on the LCDC control bit
-                let background_tile_patterns = &pattern_table1;
-
-
                 // TODO: Alternate tile map selector
-                let tile_pattern_number = background_tile_map1[tile_index] as usize;
-                let tile_pattern = &background_tile_patterns[tile_pattern_number];
+                // let tile_pattern_number = background_tile_map1[tile_index] as usize;
+                let tile_pattern_number = if self.lcdc & 0x08 == 0x08 {
+                    background_tile_map2[tile_index]
+                }
+                else {
+                    background_tile_map1[tile_index]
+                };
+
+
+
+                // TODO: Select this based on the LCDC control bit
+                // let background_tile_patterns = &pattern_table1;
+                let tile_pattern = if self.lcdc & 0x10 == 0x10 {
+                    &pattern_table1[tile_pattern_number as usize]
+                }
+                else {
+                    // Tile pattern numbers are stored in a signed format,
+                    // so even though the table starts at 0x8800, the data
+                    // corresponding to Pattern 0 is at 0x9000.
+                    //
+                    // Therefore we have to convert the signed 8-bit number
+                    // to an unsigned 8-bit number.
+                    //
+                    // This looks disgusting, but works.
+                    // TODO: Clean this up
+                    let tile_pattern_index = (((tile_pattern_number as i8) as i16) + 128) as usize;
+                    &pattern_table2[tile_pattern_index as usize]
+                };
+
+
+
+
+
+                // let tile_pattern = &background_tile_patterns[tile_pattern_number];
 
                 let tile_color = tile_pattern[tile_i];
 
@@ -468,7 +521,14 @@ impl<'a> Gpu<'a> {
                 // TODO: It would probably be better to check for a sprite first,
                 // and only then compute the color of the tile underneath if there
                 // is no sprite or if the sprite's pixel at that spot is transparent.
-                let mut color = tile_color;
+                //
+                // Check to see if the BG layer is turned off
+                let mut color = if self.lcdc & 0x01 == 0x01 {
+                    tile_color
+                }
+                else {
+                    Color::Lightest
+                };
 
                 // TODO: Only 10 sprites can be displayed per line. I'm tempted
                 // to add an option to disable this so it will show all the sprites.
@@ -493,8 +553,10 @@ impl<'a> Gpu<'a> {
                     // let sprite_i = ((sprite_y * 8) + sprite_x) as usize;  // Pixel index into tile pattern
 
                     // Check to see if the current pixel is on this sprite
-                    let sprite_position_x = sprite_data.x - 8;
-                    let sprite_position_y = sprite_data.y - 16;  // I guess the position is on the right/bottom of the sprite?
+                    //
+                    // TODO: What happens if the subtraction goes negative? Does it wrap around the screen?
+                    let sprite_position_x = sprite_data.x.saturating_sub(8);
+                    let sprite_position_y = sprite_data.y.saturating_sub(16);  // I guess the position is on the right/bottom of the sprite?
 
                     let in_x_window = (display_x as u8) >= sprite_position_x && (display_x as u8) < sprite_position_x + 8;
                     let in_y_window = (display_y as u8) >= sprite_position_y && (display_y as u8) < sprite_position_y + 8;  // TODO: 8x16, also this method sucks
@@ -505,17 +567,21 @@ impl<'a> Gpu<'a> {
 
                         let sprite_color = sprite_pattern[sprite_i];
 
-                        // If the priority flag is 0 then the sprite covers
-                        // the background and window no matter what. If it's
-                        // 1 then it covers them only if the background/window
-                        // pixel is the Lightest (00) color.
-                        //
-                        // TODO: Can these be combined somehow?
-                        if sprite_data.flags & 0x80 == 0 {
-                            color = sprite_color;
-                        }
-                        else if let Color::Lightest = tile_color {
-                            color = sprite_color;
+                        // Check to see if the sprite layer is enabled
+                        if self.lcdc & 0x02 == 0x02 {
+                            // If the priority flag is 0 then the sprite covers
+                            // the background and window no matter what. If it's
+                            // 1 then it covers them only if the background/window
+                            // pixel is the Lightest (00) color.
+                            //
+                            // TODO: Can these be combined somehow?
+                            //
+                            if sprite_data.flags & 0x80 == 0 {
+                                color = sprite_color;
+                            }
+                            else if let Color::Lightest = tile_color {
+                                color = sprite_color;
+                            }
                         }
 
 
@@ -525,6 +591,14 @@ impl<'a> Gpu<'a> {
 
 
 
+                }
+
+
+
+
+                // Check to see if the LCD is off
+                if self.lcdc & 0x80 != 0x80 {
+                    color = Color::Lightest;
                 }
 
 
