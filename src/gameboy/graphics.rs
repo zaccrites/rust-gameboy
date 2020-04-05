@@ -555,8 +555,8 @@ impl<'a> Gpu<'a> {
                     // Check to see if the current pixel is on this sprite
                     //
                     // TODO: What happens if the subtraction goes negative? Does it wrap around the screen?
-                    let sprite_position_x = sprite_data.x.saturating_sub(8);
-                    let sprite_position_y = sprite_data.y.saturating_sub(16);  // I guess the position is on the right/bottom of the sprite?
+                    let sprite_position_x = sprite_data.x - 8;
+                    let sprite_position_y = sprite_data.y - 16;  // I guess the position is on the right/bottom of the sprite?
 
                     let in_x_window = (display_x as u8) >= sprite_position_x && (display_x as u8) < sprite_position_x + 8;
                     let in_y_window = (display_y as u8) >= sprite_position_y && (display_y as u8) < sprite_position_y + 8;  // TODO: 8x16, also this method sucks
