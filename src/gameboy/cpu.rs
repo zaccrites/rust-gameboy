@@ -336,7 +336,7 @@ impl<'a> Cpu<'a> {
 
 
             Rlca => self.rlca(),
-            // Rla => self.rla(),
+            Rla => self.rla(),
 
 
             // CB
@@ -1240,7 +1240,13 @@ enum Instruction {
 
 impl Instruction {
 
-    fn decode(mut address: u16, memory: &MemoryUnit) -> Instruction {
+    #[allow(unused_assignments)]
+    fn decode(start_address: u16, memory: &MemoryUnit) -> Instruction {
+        // Invocations of the get_next macro modify this variable
+        // and use the result on following bytes, but the rust
+        // warning checker can't seem to see it.
+        let mut address = start_address;
+
         macro_rules! get_next {
             (Byte) => {
                 {

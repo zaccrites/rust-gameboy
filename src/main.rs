@@ -91,13 +91,12 @@ fn main() {
 
 
     // All peripherals should be wrapped up in a GameBoy or System struct...
-    let mut memory = Rc::new(RefCell::new(MemoryUnit::new(&cartridge)));
+    let memory = Rc::new(RefCell::new(MemoryUnit::new(&cartridge)));
     let mut cpu = Cpu::new(memory.clone());
     let mut gpu = Gpu::new(memory.clone());
     let mut timer = Timer::new(memory.clone());
     let mut joypad = Joypad::new(memory.clone());
     let mut dma = Dma::new(memory.clone());
-    // let mut audio = Gpu::new(memory.clone());  // apu?
 
 
     // TODO: Implement disassembly and debug output to show what the hell
@@ -200,7 +199,7 @@ fn main() {
 
 
             let timeout = 500;
-            if (Instant::now() - start_time > Duration::from_millis(timeout)) {
+            if Instant::now() - start_time > Duration::from_millis(timeout) {
                 // panic!("Time between vblanks exceeded {} ms", timeout);
             }
         }
@@ -216,14 +215,14 @@ fn main() {
 
         // Update once per VBlank? Per scanline when debugging?
         let pixel_data = gpu.get_pixel_data();
-        texture.update(None, &pixel_data, format.byte_size_of_pixels(gameboy::graphics::DISPLAY_RESOLUTION_X as usize));
-        canvas.copy(&texture, None, None);
+        texture.update(None, &pixel_data, format.byte_size_of_pixels(gameboy::graphics::DISPLAY_RESOLUTION_X as usize)).unwrap();
+        canvas.copy(&texture, None, None).unwrap();
 
         canvas.present();
 
 
         let end_time = Instant::now();
-        let frame_duration = (end_time - start_time);
+        let frame_duration = end_time - start_time;
 
 
 
@@ -236,16 +235,14 @@ fn main() {
         // frame was supposed to start would be enough, but it sleeps too long apparently.
         //
         //
-        if (frame_duration < target_duration) {
+        if frame_duration < target_duration {
             let sleep_duration = target_duration - frame_duration;
-            // thread::sleep(sleep_duration);
+            thread::sleep(sleep_duration);
         }
+        else {
+            println!("FRAME DURATION: {:?}", (frame_duration.subsec_nanos() as f32) / 1_000_000f32);
 
-        let actual_end_time = Instant::now();
-        let total_frame_duration = (actual_end_time - start_time);
-        // println!("ACTUAL FRAME DURATION: {:?}", (total_frame_duration.subsec_nanos() as f32) / 1_000_000f32);
-
-
+        }
 
     }
 

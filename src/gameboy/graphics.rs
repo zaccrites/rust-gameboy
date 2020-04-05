@@ -172,15 +172,14 @@ impl<'a> Gpu<'a> {
         // There is a 4560 clock V-Blank period during which the scanline
         // count continues to increase.
 
-        let OAM_READ_CLOCKS = 80;           // about 19 us
-        let LCD_TRANSFER_CLOCKS = 171;      // about 41 us
-        let HBLANK_CLOCKS = 205;            // about 48.6 us
+        const OAM_READ_CLOCKS: i64 = 80;           // about 19 us
+        const LCD_TRANSFER_CLOCKS: i64 = 171;      // about 41 us
+        const HBLANK_CLOCKS: i64 = 205;            // about 48.6 us
 
-        let SCANLINE_PERIOD = OAM_READ_CLOCKS + LCD_TRANSFER_CLOCKS + HBLANK_CLOCKS;
+        const SCANLINE_PERIOD: i64 = OAM_READ_CLOCKS + LCD_TRANSFER_CLOCKS + HBLANK_CLOCKS;
         // assert_eq!(456, OAM_READ_CLOCKS + LCD_TRANSFER_CLOCKS + HBLANK_CLOCKS);
 
-        // let VBLANK_CLOCKS = 4560;
-        let VBLANK_CLOCKS = 10 * SCANLINE_PERIOD;
+        // const VBLANK_CLOCKS: i64 = 10 * SCANLINE_PERIOD;
 
 
 
@@ -324,9 +323,9 @@ impl<'a> Gpu<'a> {
 
 
 
-    pub fn is_in_vblank(&self) -> bool {
-        self.scanline >= DISPLAY_RESOLUTION_Y as u8
-    }
+    // pub fn is_in_vblank(&self) -> bool {
+    //     self.scanline >= DISPLAY_RESOLUTION_Y as u8
+    // }
 
 
     fn set_mode(&mut self, mode: Mode) {

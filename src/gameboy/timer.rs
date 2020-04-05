@@ -6,9 +6,9 @@ use gameboy::memory::MemoryUnit;
 
 
 const DIV_PORT_NUMBER: u8 = 0x04;       // Timer Divider Register
-const TIMA_PORT_NUMBER: u8 = 0x05;      // Timer Counter Register
-const TMA_PORT_NUMBER: u8 = 0x06;       // Timer Modulo Register
-const TAC_PORT_NUMBER: u8 = 0x07;       // Timer Control Register
+// const TIMA_PORT_NUMBER: u8 = 0x05;      // Timer Counter Register
+// const TMA_PORT_NUMBER: u8 = 0x06;       // Timer Modulo Register
+// const TAC_PORT_NUMBER: u8 = 0x07;       // Timer Control Register
 
 
 // TODO: Extract this 1_000_000 cycles per second constant somewhere else
@@ -32,10 +32,10 @@ impl<'a> Timer<'a> {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.divider_cycles_remaining = DIVIDER_CYCLES;
-        self.divider_value = 0;
-    }
+    // pub fn reset(&mut self) {
+    //     self.divider_cycles_remaining = DIVIDER_CYCLES;
+    //     self.divider_value = 0;
+    // }
 
     pub fn step(&mut self, cycles: i32) {
 

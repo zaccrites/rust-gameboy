@@ -43,10 +43,6 @@ impl Default for InputState {
 }
 
 impl InputState {
-    fn read_user_input() -> InputState {
-        // TODO: Read keyboard, controller, HTTP, whatever.
-        InputState::default()
-    }
 
     // // TODO: Better way?
     // fn to_byte(self, channel: JoypadChannelSelect) -> u8 {
@@ -148,33 +144,24 @@ impl<'a> Joypad<'a> {
             // Resetting the selection bit chooses that channel.
 
             0x20 => {
-                if let ButtonState::Released = input_state.right { button_value_bits |= (1 << 0); }
-                if let ButtonState::Released = input_state.left { button_value_bits |= (1 << 1); }
-                if let ButtonState::Released = input_state.up { button_value_bits |= (1 << 2); }
-                if let ButtonState::Released = input_state.down { button_value_bits |= (1 << 3); }
-                // println!("(DPAD) Setting 0xff{:02x} to {:02x}", JOYPAD_PORT_NUMBER, 0xc0 | self.selected_channel_bits | button_value_bits);
+                if let ButtonState::Released = input_state.right { button_value_bits |= 1 << 0; }
+                if let ButtonState::Released = input_state.left { button_value_bits |= 1 << 1; }
+                if let ButtonState::Released = input_state.up { button_value_bits |= 1 << 2; }
+                if let ButtonState::Released = input_state.down { button_value_bits |= 1 << 3; }
             },
 
             0x10 => {
-                if let ButtonState::Released = input_state.a { button_value_bits |= (1 << 0); }
-                if let ButtonState::Released = input_state.b { button_value_bits |= (1 << 1); }
-                if let ButtonState::Released = input_state.select { button_value_bits |= (1 << 2); }
-                if let ButtonState::Released = input_state.start { button_value_bits |= (1 << 3); }
-                // println!("(BTNS) Setting 0xff{:02x} to {:02x}", JOYPAD_PORT_NUMBER, 0xc0 | self.selected_channel_bits | button_value_bits);
+                if let ButtonState::Released = input_state.a { button_value_bits |= 1 << 0; }
+                if let ButtonState::Released = input_state.b { button_value_bits |= 1 << 1; }
+                if let ButtonState::Released = input_state.select { button_value_bits |= 1 << 2; }
+                if let ButtonState::Released = input_state.start { button_value_bits |= 1 << 3; }
             },
 
             _ => button_value_bits |= 0x0f,
         }
 
-        // println!(">> {:02x}", button_value_bits);
-
-        // println!("Setting 0xff{:02x} to {:02x}", JOYPAD_PORT_NUMBER, self.selected_channel_bits | button_value_bits);
-
         // The unused bits are set.
         self.memory.borrow_mut().set_io_read_value(JOYPAD_PORT_NUMBER, 0xc0 | self.selected_channel_bits | button_value_bits);
-
-
-
     }
 
 }
