@@ -3,3 +3,7 @@
 
 *.sublime-workspace
 roms/
+
+# Download from https://www.libsdl.org/download-2.0.php
+SDL2.dll
+SDL2.lib
